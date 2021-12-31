@@ -1,3 +1,21 @@
+coolkid自用修改版本
+
+修改内容: 替换原版x265 使用[x265 - Yuuki变异版](https://www.nmm-hd.org/newbbs/viewtopic.php?f=8&t=1592) 源代码地址:[https://github.com/msg7086/x265-Yuuki-Asuna](https://github.com/msg7086/x265-Yuuki-Asuna)
+
+需要做好如下准备:
+
+1.  https://github.com/vapoursynth/vapoursynth/releases 下载VapourSynth64-Portable-RXX.7z 解压SDK的.h文件到include目录
+2. 编译过程出现ERROR: x265 not found using pkg-config 需要在x265.h文件中添加
+```cpp
+#include <stdbool.h>
+```
+
+
+
+
+
+以下是原版readme
+
 ffmpeg-windows-build-helpers
 ============================
 

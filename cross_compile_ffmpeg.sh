@@ -1807,19 +1807,42 @@ build_avisynth() {
     do_make_install
   cd ../..
 }
+build_vapoursynth() {
+  ### 其实不用编译这个 https://github.com/vapoursynth/vapoursynth/releases 下载VapourSynth64-Portable-RXX.7z 解压SDK的.h文件到include目录就可以了
+  ###
+  do_git_checkout https://github.com/vapoursynth/vapoursynth.git vapoursynth_git
+  cd vapoursynth_git
+  ./autogen.sh
+    do_configure "--host=$host_target --enable-vsscript=no --enable-vspipe=no --enable-python-module=no --includedir=$mingw_w64_x86_64_prefix/include --libdir=$mingw_w64_x86_64_prefix/lib"
+    if [[ $compiler_flavors != "native" && ! -f src/core/vscore.h.bak ]]; then
+	    sed -i.bak "s/#include <mutex>/#include \"mingw.mutex.h\"/" src/core/vscore.h
+	    sed -i.bak "s/#include <condition_variable>/#include \"mingw.condition_variable.h\"/" src/core/vscore.h
+	    sed -i.bak "s/#include <thread>/#include \"mingw.thread.h\"/" src/core/vscore.h
+    fi
+    if [[ $compiler_flavors != "native" && ! -f src/core/vslog.cpp.bak ]]; then
+            sed -i.bak "s/#include <mutex>/#include \"mingw.mutex.h\"/" src/core/vslog.cpp
+    fi
+    if [[ $compiler_flavors != "native" && ! -f src/core/memoryuse.h.bak ]]; then
+            sed -i.bak "s/#include <mutex>/#include \"mingw.mutex.h\"/" src/core/memoryuse.h
+    fi 
+    do_make_and_make_install
+  cd ..
+}
 
 build_libx265() {
   local checkout_dir=x265_all_bitdepth
-  local remote="https://bitbucket.org/multicoreware/x265_git"
+  ##local remote="https://bitbucket.org/multicoreware/x265_git"
+  local remote="https://github.com/msg7086/x265-Yuuki-Asuna.git"
   if [[ ! -z $x265_git_checkout_version ]]; then
     checkout_dir+="_$x265_git_checkout_version"
     do_git_checkout "$remote" $checkout_dir "$x265_git_checkout_version"
   fi
   if [[ $prefer_stable = "n" ]] && [[ -z $x265_git_checkout_version ]] ; then
-    do_git_checkout "$remote" $checkout_dir "origin/master"
+    do_git_checkout "$remote" $checkout_dir "origin/stable"
   fi
   if [[ $prefer_stable = "y" ]] && [[ -z $x265_git_checkout_version ]] ; then
-    do_git_checkout "$remote" $checkout_dir "origin/stable"
+    ##默认使用Stable
+    do_git_checkout "$remote" $checkout_dir "origin/Yuuki"
   fi
   cd $checkout_dir
 
@@ -2636,11 +2659,12 @@ build_ffmpeg_dependencies() {
   build_lensfun  # requires png, zlib, iconv
   # build_libtensorflow # broken
   build_libvpx
+  build_avisynth
+  #build_vapoursynth
   build_libx265
   build_libopenh264
   build_libaom
   build_dav1d
-  build_avisynth
   build_libx264 # at bottom as it might internally build a copy of ffmpeg (which needs all the above deps...
  }
 
