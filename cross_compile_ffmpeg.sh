@@ -1870,16 +1870,12 @@ build_vapoursynth() {
 
 build_libx265() {
   local checkout_dir=x265_all_bitdepth
-  ##local remote="https://bitbucket.org/multicoreware/x265_git"
   local remote="https://github.com/msg7086/x265-Yuuki-Asuna.git"
   if [[ ! -z $x265_git_checkout_version ]]; then
     checkout_dir+="_$x265_git_checkout_version"
     do_git_checkout "$remote" $checkout_dir "$x265_git_checkout_version"
   fi
-  if [[ $prefer_stable = "n" ]] && [[ -z $x265_git_checkout_version ]] ; then
-    do_git_checkout "$remote" $checkout_dir "origin/stable"
-  fi
-  if [[ $prefer_stable = "y" ]] && [[ -z $x265_git_checkout_version ]] ; then
+  if [[ -z $x265_git_checkout_version ]] ; then
     ##默认使用Stable
     do_git_checkout "$remote" $checkout_dir "origin/Yuuki"
   fi
