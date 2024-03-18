@@ -1849,11 +1849,12 @@ build_avisynth() {
 build_vapoursynth() {
   ### 其实不用编译这个 https://github.com/vapoursynth/vapoursynth/releases 下载VapourSynth64-Portable-RXX.7z 解压SDK的.h文件到include目录就可以了
   mkdir -p vapoursynth
+  cd vapoursynth
   local include_path=$mingw_w64_x86_64_prefix/include/vapoursynth
   mkdir -p $include_path
   local version=$(curl -Ls "https://api.github.com/repos/vapoursynth/vapoursynth/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-  download_and_unpack_file https://github.com/vapoursynth/vapoursynth/releases/latest/download/VapourSynth64-Portable-$version.zip
-  cp VapourSynth64-Portable-$version/sdk/include/*.h $include_path
+	download_and_unpack_file https://github.com/vapoursynth/vapoursynth/releases/latest/download/VapourSynth64-Portable-$version.zip .
+	cp ./sdk/include/*.h $include_path
   cd ..
 }
 
