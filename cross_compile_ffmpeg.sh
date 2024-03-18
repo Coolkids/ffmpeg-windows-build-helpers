@@ -199,12 +199,12 @@ check_missing_packages () {
   #check if WSL
   # check WSL for interop setting make sure its disabled
   # check WSL for kernel version look for version 4.19.128 current as of 11/01/2020
-  if uname -a | grep  -q -- "-microsoft" ; then
+  if uname -a | grep  -iq -- "-microsoft" ; then
     if cat /proc/sys/fs/binfmt_misc/WSLInterop | grep -q enabled ; then
       echo "windows WSL detected: you must first disable 'binfmt' by running this
       sudo bash -c 'echo 0 > /proc/sys/fs/binfmt_misc/WSLInterop'
       then try again"
-      exit 1
+      #exit 1
     fi
     export MINIMUM_KERNEL_VERSION="4.19.128"
     KERNVER=$(uname -a | awk -F'[ ]' '{ print $3 }' | awk -F- '{ print $1 }')
@@ -216,7 +216,7 @@ check_missing_packages () {
     if [ $(version $KERNVER) -lt $(version $MINIMUM_KERNEL_VERSION) ]; then
       echo "Windows Subsystem for Linux (WSL) detected - kernel not at minumum version required: $MINIMUM_KERNEL_VERSION
       Please update via windows update then try again"
-      exit 1
+      #exit 1
     fi
     echo "for WSL ubuntu 20.04 you need to do an extra step https://github.com/rdp/ffmpeg-windows-build-helpers/issues/452"
   fi
@@ -351,7 +351,7 @@ install_cross_compiler() {
       if [[ `uname` =~ "5.1" ]]; then # Avoid using secure API functions for compatibility with msvcrt.dll on Windows XP.
         sed -i "s/ --enable-secure-api//" $zeranoe_script_name
       fi
-      nice ./$zeranoe_script_name $zeranoe_script_options --build-type=win32 || exit 1
+      CFLAGS=-O2 CXXFLAGS=-O2 nice ./$zeranoe_script_name $zeranoe_script_options --build-type=win32 || exit 1
       if [[ ! -f ../$win32_gcc ]]; then
         echo "Failure building 32 bit gcc? Recommend nuke sandbox (rm -rf sandbox) and start over..."
         exit 1
@@ -364,7 +364,7 @@ install_cross_compiler() {
     if [[ ($compiler_flavors == "win64" || $compiler_flavors == "multi") && ! -f ../$win64_gcc ]]; then
       echo "Building win64 x86_64 cross compiler..."
       download_gcc_build_script $zeranoe_script_name
-      nice ./$zeranoe_script_name $zeranoe_script_options --build-type=win64 || exit 1
+      CFLAGS=-O2 CXXFLAGS=-O2 nice ./$zeranoe_script_name $zeranoe_script_options --build-type=win64 || exit 1
       if [[ ! -f ../$win64_gcc ]]; then
         echo "Failure building 64 bit gcc? Recommend nuke sandbox (rm -rf sandbox) and start over..."
         exit 1
@@ -485,6 +485,7 @@ do_configure() {
       ./bootstrap.sh
     fi
     if [[ ! -f $configure_name ]]; then
+      echo "running autoreconf to generate configure file for us..."
       autoreconf -fiv # a handful of them require this to create ./configure :|
     fi
     rm -f already_* # reset
@@ -498,7 +499,8 @@ do_configure() {
 }
 
 do_make() {
-  local extra_make_options="$1 -j $cpu_count"
+  local extra_make_options="$1"
+  extra_make_options="$extra_make_options -j $cpu_count"
   local cur_dir2=$(pwd)
   local touch_name=$(get_small_touchfile_name already_ran_make "$extra_make_options" )
 
@@ -694,7 +696,9 @@ download_and_unpack_file() {
 }
 
 generic_configure() {
+  build_triple="${build_triple:-$(gcc -dumpmachine)}"
   local extra_configure_options="$1"
+  if [[ -n $build_triple ]]; then extra_configure_options+=" --build=$build_triple"; fi
   do_configure "--host=$host_target --prefix=$mingw_w64_x86_64_prefix --disable-shared --enable-static $extra_configure_options"
 }
 
@@ -830,7 +834,7 @@ build_amd_amf_headers() {
   # was https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git too big
   # or https://github.com/DeadSix27/AMF smaller
   # but even smaller!
-  do_git_checkout https://github.com/rdp/amf_headers.git amf_headers_git
+  do_git_checkout https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git amf_headers_git
 
   cd amf_headers_git
     if [ ! -f "already_installed" ]; then
@@ -845,7 +849,12 @@ build_amd_amf_headers() {
 }
 
 build_nv_headers() {
-  do_git_checkout https://github.com/FFmpeg/nv-codec-headers.git
+  if [[ $ffmpeg_git_checkout_version == *"n6.0"* ]] || [[ $ffmpeg_git_checkout_version == *"n5.1"* ]] || [[ $ffmpeg_git_checkout_version == *"n5.0"* ]] || [[ $ffmpeg_git_checkout_version == *"n4.4"* ]] || [[ $ffmpeg_git_checkout_version == *"n4.3"* ]] || [[ $ffmpeg_git_checkout_version == *"n4.2"* ]] || [[ $ffmpeg_git_checkout_version == *"n4.1"* ]] || [[ $ffmpeg_git_checkout_version == *"n3.4"* ]] || [[ $ffmpeg_git_checkout_version == *"n3.2"* ]] || [[ $ffmpeg_git_checkout_version == *"n2.8"* ]]; then
+    # nv_headers for old versions
+    do_git_checkout https://github.com/FFmpeg/nv-codec-headers.git nv-codec-headers_git n12.0.16.1
+  else
+    do_git_checkout https://github.com/FFmpeg/nv-codec-headers.git
+  fi
   cd nv-codec-headers_git
     do_make_install "PREFIX=$mingw_w64_x86_64_prefix" # just copies in headers
   cd ..
@@ -919,7 +928,7 @@ build_glib() {
 
 build_lensfun() {
   build_glib
-  do_git_checkout https://github.com/lensfun/lensfun.git lensfun_git
+  do_git_checkout https://github.com/lensfun/lensfun.git lensfun_git v0.3.3
   cd lensfun_git
     export CMAKE_STATIC_LINKER_FLAGS='-lws2_32 -pthread'
     do_cmake "-DBUILD_STATIC=on -DCMAKE_INSTALL_DATAROOTDIR=$mingw_w64_x86_64_prefix"
@@ -935,6 +944,7 @@ build_libtesseract() {
   build_libleptonica
   do_git_checkout https://github.com/tesseract-ocr/tesseract.git tesseract_git 4.1.1
   cd tesseract_git
+    sed -i.bak 's/libcurl/libbcurl_disabled/g' configure.ac # --disable-curl hard disable, sometimes it's here but they link it wrong so punt...
     if [[ $compiler_flavors != "native"  ]]; then
       apply_patch file://$patch_dir/tesseract-4.1.1_mingw-std-threads.patch
       generic_configure "--disable-openmp"
@@ -955,7 +965,7 @@ build_libzimg() {
 }
 
 build_libopenjpeg() {
-  do_git_checkout https://github.com/uclouvain/openjpeg.git # basically v2.3+
+  do_git_checkout https://github.com/uclouvain/openjpeg.git openjpeg_git v2.5.0
   cd openjpeg_git
     do_cmake_and_install "-DBUILD_CODEC=0"
   cd ..
@@ -989,7 +999,7 @@ build_libpng() {
 }
 
 build_libwebp() {
-  do_git_checkout https://chromium.googlesource.com/webm/libwebp.git
+  do_git_checkout https://chromium.googlesource.com/webm/libwebp.git libwebp_git v1.2.4
   cd libwebp_git
     export LIBPNG_CONFIG="$mingw_w64_x86_64_prefix/bin/libpng-config --static" # LibPNG somehow doesn't get autodetected.
     generic_configure "--disable-wic"
@@ -1040,6 +1050,7 @@ build_freetype() {
     download_and_unpack_file https://sourceforge.net/projects/freetype/files/freetype2/2.10.4/freetype-2.10.4.tar.xz
     rm -f freetype-2.10.4/already*
     cd freetype-2.10.4
+        apply_patch file://$patch_dir/freetype2-crosscompiled-apinames.diff # src/tools/apinames.c gets crosscompiled and makes the compilation fail
         # harfbuzz autodetect :|
         generic_configure "--with-bzip2 $1"
         do_make_and_make_install
@@ -1161,10 +1172,11 @@ build_gnutls() {
     # --disable-guile is so that if it finds guile installed (cygwin did/does) it won't try and link/build to it and fail...
     # libtasn1 is some dependency, appears provided is an option [see also build_libnettle]
     # pks #11 hopefully we don't need kit
+    apply_patch file://$patch_dir/gnutls-windows8.patch -p1 # defaults to win 8 kind of, either this or setWINNT_VER :|
     generic_configure "--disable-doc --disable-tools --disable-cxx --disable-tests --disable-gtk-doc-html --disable-libdane --disable-nls --enable-local-libopts --disable-guile --with-included-libtasn1 --without-p11-kit"
     do_make_and_make_install
     if [[ $compiler_flavors != "native"  ]]; then
-      # libsrt doesn't know how to use its pkg deps :| https://github.com/Haivision/srt/issues/565
+      # libsrt doesn't know how to use its pkg deps, so put them in as non-static deps :| https://github.com/Haivision/srt/issues/565
       sed -i.bak 's/-lgnutls.*/-lgnutls -lcrypt32 -lnettle -lhogweed -lgmp -lidn2 -liconv -lunistring/' "$PKG_CONFIG_PATH/gnutls.pc"
       if [[ $OSTYPE == darwin* ]]; then
         sed -i.bak 's/-lgnutls.*/-lgnutls -framework Security -framework Foundation/' "$PKG_CONFIG_PATH/gnutls.pc"
@@ -1527,8 +1539,8 @@ build_libsnappy() {
 }
 
 build_vamp_plugin() {
-  download_and_unpack_file https://github.com/c4dm/vamp-plugin-sdk/archive/vamp-plugin-sdk-v2.10.tar.gz vamp-plugin-sdk-vamp-plugin-sdk-v2.10
-  cd vamp-plugin-sdk-vamp-plugin-sdk-v2.10
+  download_and_unpack_file https://code.soundsoftware.ac.uk/attachments/download/2691/vamp-plugin-sdk-2.10.0.tar.gz
+  cd vamp-plugin-sdk-2.10.0
     apply_patch file://$patch_dir/vamp-plugin-sdk-2.10_static-lib.diff
     if [[ $compiler_flavors != "native" && ! -f src/vamp-sdk/PluginAdapter.cpp.bak ]]; then
       sed -i.bak "s/#include <mutex>/#include <mingw.mutex.h>/" src/vamp-sdk/PluginAdapter.cpp
@@ -1572,8 +1584,10 @@ build_librubberband() {
 }
 
 build_frei0r() {
-  do_git_checkout https://github.com/dyne/frei0r.git
-  cd frei0r_git
+  #do_git_checkout https://github.com/dyne/frei0r.git
+  #cd frei0r_git
+  download_and_unpack_file https://github.com/dyne/frei0r/archive/refs/tags/v2.3.0.tar.gz frei0r-2.3.0
+  cd frei0r-2.3.0
     sed -i.bak 's/-arch i386//' CMakeLists.txt # OS X https://github.com/dyne/frei0r/issues/64
     do_cmake_and_install "-DWITHOUT_OPENCV=1" # XXX could look at this more...
 
@@ -1606,18 +1620,18 @@ build_svt-hevc() {
   cd ../..
 }
 
-build_svt-av1() {
-  do_git_checkout https://gitlab.com/AOMediaCodec/SVT-AV1.git
-  cd SVT-AV1_git
+build_svt-vp9() {
+  do_git_checkout https://github.com/OpenVisualCloud/SVT-VP9.git
+  cd SVT-VP9_git
   cd Build
     do_cmake_from_build_dir .. "-DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_PROCESSOR=AMD64"
     do_make_and_make_install
   cd ../..
 }
 
-build_svt-vp9() {
-  do_git_checkout https://github.com/OpenVisualCloud/SVT-VP9.git
-  cd SVT-VP9_git
+build_svt-av1() {
+  do_git_checkout https://gitlab.com/AOMediaCodec/SVT-AV1.git
+  cd SVT-AV1_git
   cd Build
     do_cmake_from_build_dir .. "-DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_PROCESSOR=AMD64"
     do_make_and_make_install
@@ -1639,7 +1653,6 @@ build_libmysofa() {
       cmake_params+=" -DCODE_COVERAGE=0"
     fi
     do_cmake "$cmake_params"
-    apply_patch file://$patch_dir/libmysofa.patch -p1 # maybe unneeded now that double cmake no longer...hmm...
     do_make_and_make_install
   cd ..
 }
@@ -1661,7 +1674,14 @@ build_libcaca() {
 }
 
 build_libdecklink() {
-  do_git_checkout https://notabug.org/RiCON/decklink-headers.git
+  local url=https://notabug.org/RiCON/decklink-headers.git
+  git ls-remote $url
+  if [ $? -ne 0 ]; then
+    # If NotABug.org server is down , Change to use GitLab.com .
+    # https://gitlab.com/m-ab-s/decklink-headers
+    url=https://gitlab.com/m-ab-s/decklink-headers.git
+  fi
+  do_git_checkout $url
   cd decklink-headers_git
     do_make_install PREFIX=$mingw_w64_x86_64_prefix
   cd ..
@@ -1689,9 +1709,7 @@ build_fribidi() {
 }
 
 build_libsrt() {
-  # do_git_checkout https://github.com/Haivision/srt.git
-  #cd srt_git
-  #download_and_unpack_file https://codeload.github.com/Haivision/srt/tar.gz/v1.3.2 srt-1.3.2
+  # do_git_checkout https://github.com/Haivision/srt.git # might be able to use these days...?
   download_and_unpack_file https://github.com/Haivision/srt/archive/v1.4.1.tar.gz srt-1.4.1
   cd srt-1.4.1
     if [[ $compiler_flavors != "native" ]]; then
@@ -1714,6 +1732,16 @@ build_libaribb24() {
   cd aribb24
     generic_configure_make_install
   cd ..
+}
+
+build_libaribcaption() {
+  do_git_checkout https://github.com/xqq/libaribcaption
+  cd libaribcaption
+  mkdir build
+  cd build
+  do_cmake_from_build_dir .. "-DCMAKE_BUILD_TYPE=Release"
+  do_make_and_make_install
+  cd ../..
 }
 
 build_libxavs() {
@@ -1758,9 +1786,9 @@ build_libxvid() {
 }
 
 build_libvpx() {
-  do_git_checkout https://chromium.googlesource.com/webm/libvpx.git
+  do_git_checkout https://chromium.googlesource.com/webm/libvpx.git libvpx_git "origin/main"
   cd libvpx_git
-     apply_patch file://$patch_dir/vpx_160_semaphore.patch -p1 # perhaps someday can remove this after 1.6.0 or mingw fixes it LOL
+    apply_patch file://$patch_dir/vpx_160_semaphore.patch -p1 # perhaps someday can remove this after 1.6.0 or mingw fixes it LOL
     if [[ $compiler_flavors == "native" ]]; then
       local config_options=""
     elif [[ "$bits_target" = "32" ]]; then
@@ -1768,7 +1796,8 @@ build_libvpx() {
     else
       local config_options="--target=x86_64-win64-gcc"
     fi
-    export CROSS="$cross_prefix"  # VP8 encoder *requires* sse3 support
+    export CROSS="$cross_prefix"  
+    # VP8 encoder *requires* sse3 support
     do_configure "$config_options --prefix=$mingw_w64_x86_64_prefix --enable-ssse3 --enable-static --disable-shared --disable-examples --disable-tools --disable-docs --disable-unit-tests --enable-vp9-highbitdepth --extra-cflags=-fno-asynchronous-unwind-tables --extra-cflags=-mstackrealign" # fno for Error: invalid register for .seh_savexmm
     do_make_and_make_install
     unset CROSS
@@ -1859,7 +1888,7 @@ build_libx265() {
   local cmake_params="-DENABLE_SHARED=0" # build x265.exe
 
   if [ "$bits_target" = "32" ]; then
-    cmake_params+=" -DWINXP_SUPPORT=1" # enable windows xp/vista compatibility in x86 build
+    cmake_params+=" -DWINXP_SUPPORT=1" # enable windows xp/vista compatibility in x86 build, since it still can I think...
   fi
   mkdir -p 8bit 10bit 12bit
 
@@ -1906,7 +1935,7 @@ SAVE
 END
 EOF
   fi
-  make install # force reinstall in case changed stable -> unstable
+  make install # force reinstall in case you just switched from stable to not :|
   cd ../..
 }
 
@@ -1940,7 +1969,6 @@ build_libx264() {
   fi
 
   local x264_profile_guided=n # or y -- haven't gotten this proven yet...TODO
-  checkout_dir="${checkout_dir}_all_bitdepth"
 
   if [[ $prefer_stable = "n" ]]; then
     checkout_dir="${checkout_dir}_unstable"
@@ -2062,7 +2090,11 @@ build_lua() {
 }
 
 build_libcurl() {
-  generic_download_and_make_and_install https://curl.haxx.se/download/curl-7.46.0.tar.gz
+  download_and_unpack_file https://curl.haxx.se/download/curl-7.86.0.tar.gz
+  cd curl-7.86.0
+    generic_configure "--without-ssl" # XXX use --with-gnutls but it needed pkg-config or some odd?
+    do_make_and_make_install
+  cd ..
 }
 
 build_libhdhomerun() {
@@ -2374,14 +2406,10 @@ build_ffmpeg() {
       init_options+=" --disable-schannel"
       # Fix WinXP incompatibility by disabling Microsoft's Secure Channel, because Windows XP doesn't support TLS 1.1 and 1.2, but with GnuTLS or OpenSSL it does.  XP compat!
     fi
-    config_options="$init_options --enable-libcaca --enable-gray --enable-libtesseract --enable-fontconfig --enable-gmp --enable-gnutls --enable-libass --enable-libbluray --enable-libbs2b --enable-libflite --enable-libfreetype --enable-libfribidi --enable-libgme --enable-libgsm --enable-libilbc --enable-libmodplug --enable-libmp3lame --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopus --enable-libsnappy --enable-libsoxr --enable-libspeex --enable-libtheora --enable-libtwolame --enable-libvo-amrwbenc --enable-libvorbis --enable-libwebp --enable-libzimg --enable-libzvbi --enable-libmysofa --enable-libopenjpeg  --enable-libopenh264  --enable-libvmaf --enable-libsrt --enable-libxml2 --enable-opengl --enable-libdav1d --enable-cuda-llvm"
+    config_options="$init_options --enable-libcaca --enable-gray --enable-libtesseract --enable-fontconfig --enable-gmp --enable-libass --enable-libbluray --enable-libbs2b --enable-libflite --enable-libfreetype --enable-libfribidi --enable-libgme --enable-libgsm --enable-libilbc --enable-libmodplug --enable-libmp3lame --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopus --enable-libsnappy --enable-libsoxr --enable-libspeex --enable-libtheora --enable-libtwolame --enable-libvo-amrwbenc --enable-libvorbis --enable-libwebp --enable-libzimg --enable-libzvbi --enable-libmysofa --enable-libopenjpeg  --enable-libopenh264  --enable-libvmaf --enable-libsrt --enable-libxml2 --enable-opengl --enable-libdav1d --enable-gnutls"
 
-    if [[ $build_svt = y ]]; then
-      if [ "$bits_target" != "32" ]; then
-
-        # SVT-VP9 see comments below
-        # git apply "$work_dir/SVT-VP9_git/ffmpeg_plugin/master-0001-Add-ability-for-ffmpeg-to-run-svt-vp9.patch"
-
+    if [[ "$bits_target" != "32" ]]; then
+      if [[ $build_svt_hevc = y ]]; then
         # SVT-HEVC
         # Apply the correct patches based on version. Logic (n4.4 patch for n4.2, n4.3 and n4.4)  based on patch notes here:
         # https://github.com/OpenVisualCloud/SVT-HEVC/commit/b5587b09f44bcae70676f14d3bc482e27f07b773#diff-2b35e92117ba43f8397c2036658784ba2059df128c9b8a2625d42bc527dffea1
@@ -2391,14 +2419,30 @@ build_ffmpeg() {
         elif [[ $ffmpeg_git_checkout_version == *"n4.1"* ]] || [[ $ffmpeg_git_checkout_version == *"n3.4"* ]] || [[ $ffmpeg_git_checkout_version == *"n3.2"* ]] || [[ $ffmpeg_git_checkout_version == *"n2.8"* ]]; then
           : # too old...
         else
+          # newer:
           git apply "$work_dir/SVT-HEVC_git/ffmpeg_plugin/master-0001-lavc-svt_hevc-add-libsvt-hevc-encoder-wrapper.patch"
         fi
         config_options+=" --enable-libsvthevc"
-        config_options+=" --enable-libsvtav1"
-        # config_options+=" --enable-libsvtvp9" #not currently working but compiles if configured
-        config_options+=" --enable-libvpx"
-      fi # else doesn't work/matter with 32 bit
-    fi
+      fi
+      if [[ $build_svt_vp9 = y ]]; then
+        # SVT-VP9
+        # Apply the correct patches based on version. Logic (n4.4 patch for n4.2, n4.3 and n4.4)  based on patch notes here:
+        # https://github.com/OpenVisualCloud/SVT-VP9/tree/master/ffmpeg_plugin
+        if [[ $ffmpeg_git_checkout_version == *"n4.3.1"* ]]; then
+          git apply "$work_dir/SVT-VP9_git/ffmpeg_plugin/n4.3.1-0001-Add-ability-for-ffmpeg-to-run-svt-vp9.patch"
+        elif [[ $ffmpeg_git_checkout_version == *"n4.2.3"* ]]; then
+          git apply "$work_dir/SVT-VP9_git/ffmpeg_plugin/n4.2.3-0001-Add-ability-for-ffmpeg-to-run-svt-vp9.patch"
+        elif [[ $ffmpeg_git_checkout_version == *"n4.2.2"* ]]; then
+          git apply "$work_dir/SVT-VP9_git/ffmpeg_plugin/0001-Add-ability-for-ffmpeg-to-run-svt-vp9.patch"
+        else 
+          # newer:
+          git apply "$work_dir/SVT-VP9_git/ffmpeg_plugin/master-0001-Add-ability-for-ffmpeg-to-run-svt-vp9.patch"
+        fi
+		config_options+=" --enable-libsvtvp9"
+      fi
+      config_options+=" --enable-libsvtav1"
+    fi # else doesn't work/matter with 32 bit
+    config_options+=" --enable-libvpx"
     config_options+=" --enable-libaom"
 
     if [[ $compiler_flavors != "native" ]]; then
@@ -2407,7 +2451,10 @@ build_ffmpeg() {
 
     config_options+=" --extra-libs=-lharfbuzz" #  grr...needed for pre x264 build???
     config_options+=" --extra-libs=-lm" # libflite seemed to need this linux native...and have no .pc file huh?
-    config_options+=" --extra-libs=-lshlwapi" # lame needed this, no .pc file?
+
+    if [[ $compiler_flavors != "native" ]]; then
+      config_options+=" --extra-libs=-lshlwapi" # lame needed this, no .pc file?
+    fi
     config_options+=" --extra-libs=-lmpg123" # ditto
     config_options+=" --extra-libs=-lpthread" # for some reason various and sundry needed this linux native
 
@@ -2423,6 +2470,12 @@ build_ffmpeg() {
     else
       config_options+=" --disable-libmfx"
     fi
+    
+    if [[ $ffmpeg_git_checkout_version != *"n6.0"* ]] && [[ $ffmpeg_git_checkout_version != *"n5.1"* ]] && [[ $ffmpeg_git_checkout_version != *"n5.0"* ]] && [[ $ffmpeg_git_checkout_version != *"n4.4"* ]] && [[ $ffmpeg_git_checkout_version != *"n4.3"* ]] && [[ $ffmpeg_git_checkout_version != *"n4.2"* ]] && [[ $ffmpeg_git_checkout_version != *"n4.1"* ]] && [[ $ffmpeg_git_checkout_version != *"n3.4"* ]] && [[ $ffmpeg_git_checkout_version != *"n3.2"* ]] && [[ $ffmpeg_git_checkout_version != *"n2.8"* ]]; then
+      # Disable libaribcatption on old versions
+      config_options+=" --enable-libaribcaption" # libaribcatption (MIT licensed)
+    fi
+    
     if [[ $enable_gpl == 'y' ]]; then
       config_options+=" --enable-gpl --enable-frei0r --enable-librubberband --enable-libvidstab --enable-libx264 --enable-libx265 --enable-avisynth --enable-libaribb24"
       config_options+=" --enable-libxvid --enable-libdavs2"
@@ -2479,12 +2532,12 @@ build_ffmpeg() {
 
     # XXX really ffmpeg should have set this up right but doesn't, patch FFmpeg itself instead...
     if [[ $1 == "static" ]]; then
+     # nb we can just modify this every time, it getes recreated, above..
       if [[ $build_intel_qsv = y  && $compiler_flavors != "native" ]]; then # Broken for native builds right now: https://github.com/lu-zero/mfx_dispatch/issues/71
-        sed -i.bak 's/-lavutil -lm.*/-lavutil -lm -lmfx -lstdc++ -lpthread/' "$PKG_CONFIG_PATH/libavutil.pc"
+        sed -i.bak 's/-lavutil -pthread -lm /-lavutil -pthread -lm -lmfx -lstdc++ -lmpg123 -lshlwapi /' "$PKG_CONFIG_PATH/libavutil.pc"
       else
-        sed -i.bak 's/-lavutil -lm.*/-lavutil -lm -lpthread/' "$PKG_CONFIG_PATH/libavutil.pc"
+        sed -i.bak 's/-lavutil -pthread -lm /-lavutil -pthread -lm -lmpg123 -lshlwapi /' "$PKG_CONFIG_PATH/libavutil.pc"
       fi
-      sed -i.bak 's/-lswresample -lm.*/-lswresample -lm -lsoxr/' "$PKG_CONFIG_PATH/libswresample.pc" # XXX patch ffmpeg
     fi
 
     sed -i.bak 's/-lswresample -lm.*/-lswresample -lm -lsoxr/' "$PKG_CONFIG_PATH/libswresample.pc" # XXX patch ffmpeg
@@ -2513,15 +2566,17 @@ build_ffmpeg() {
           cd ..
         fi
       else
-        echo "Done! You will find $bits_target-bit $1 binaries in $(pwd)"
+        echo "Done! You will find $bits_target-bit $1 binaries in $(pwd)" `date`
         if [[ ! -f $archive.7z ]]; then
           sed "s/$/\r/" COPYING.GPLv3 > COPYING.GPLv3.txt
+          echo "creating distro zip..." # XXX opt in?
           7z a -mx=9 $archive.7z ffmpeg.exe ffplay.exe ffprobe.exe COPYING.GPLv3.txt && rm -f COPYING.GPLv3.txt
+        else
+          echo "not creating distro zip as one already exists..."
         fi
       fi
-      echo "You will find redistributable archive .7z file in $cur_dir/redist"
+      echo "You will find redistributable archive .7z file in $archive.7z"
     fi
-    echo `date`
 
   if [[ -z $ffmpeg_source_dir ]]; then
     cd ..
@@ -2531,8 +2586,8 @@ build_ffmpeg() {
 }
 
 build_lsw() {
-   # Build L-Smash-Works, which are plugins based on lsmash
-   #build_ffmpeg static # dependency, assume already built
+   # Build L-Smash-Works, which are AviSynth plugins based on lsmash/ffmpeg
+   #build_ffmpeg static # dependency, assume already built since it builds before this does...
    build_lsmash # dependency
    do_git_checkout https://github.com/VFR-maniac/L-SMASH-Works.git lsw
    cd lsw/VapourSynth
@@ -2639,10 +2694,14 @@ build_ffmpeg_dependencies() {
   build_libsamplerate # Needs libsndfile >= 1.0.6 and fftw >= 0.15.0 for tests. Uses dlfcn.
   build_librubberband # Needs libsamplerate, libsndfile, fftw and vamp_plugin. 'configure' will fail otherwise. Eventhough librubberband doesn't necessarily need them (libsndfile only for 'rubberband.exe' and vamp_plugin only for "Vamp audio analysis plugin"). How to use the bundled libraries '-DUSE_SPEEX' and '-DUSE_KISSFFT'?
   build_frei0r # Needs dlfcn. could use opencv...
-  if [[ "$bits_target" != "32" && $build_svt = "y" ]]; then
-    build_svt-hevc
+  if [[ "$bits_target" != "32" ]]; then
+    if [[ $build_svt_hevc = y ]]; then
+      build_svt-hevc
+    fi
+    if [[ $build_svt_vp9 = y ]]; then
+      build_svt-vp9
+    fi
     build_svt-av1
-    build_svt-vp9
   fi
   build_vidstab
   #build_facebooktransform360 # needs modified ffmpeg to use it so not typically useful
@@ -2659,6 +2718,9 @@ build_ffmpeg_dependencies() {
 
   build_libxvid # FFmpeg now has native support, but libxvid still provides a better image.
   build_libsrt # requires gnutls, mingw-std-threads
+  if [[ $ffmpeg_git_checkout_version != *"n6.0"* ]] && [[ $ffmpeg_git_checkout_version != *"n5.1"* ]] && [[ $ffmpeg_git_checkout_version != *"n5.0"* ]] && [[ $ffmpeg_git_checkout_version != *"n4.4"* ]] && [[ $ffmpeg_git_checkout_version != *"n4.3"* ]] && [[ $ffmpeg_git_checkout_version != *"n4.2"* ]] && [[ $ffmpeg_git_checkout_version != *"n4.1"* ]] && [[ $ffmpeg_git_checkout_version != *"n3.4"* ]] && [[ $ffmpeg_git_checkout_version != *"n3.2"* ]] && [[ $ffmpeg_git_checkout_version != *"n2.8"* ]]; then
+    build_libaribcaption
+  fi
   build_libaribb24
   build_libtesseract
   build_lensfun  # requires png, zlib, iconv
@@ -2765,7 +2827,8 @@ enable_gpl=y
 build_x264_with_libav=n # To build x264 with Libavformat.
 ffmpeg_git_checkout="https://github.com/FFmpeg/FFmpeg.git"
 ffmpeg_source_dir=
-build_svt=y
+build_svt_hevc=n
+build_svt_vp9=n
 
 # parse command line parameters, if any
 while true; do
@@ -2790,7 +2853,8 @@ while true; do
       --build-lsw=n [builds L-Smash Works VapourSynth and AviUtl plugins]
       --build-ismindex=n [builds ffmpeg utility ismindex.exe]
       -a 'build all' builds ffmpeg, mplayer, vlc, etc. with all fixings turned on [many disabled from disuse these days]
-      --build-svt=n [builds libsvt-hevc modules within ffmpeg etc.]
+      --build-svt-hevc=n [builds libsvt-hevc modules within ffmpeg etc.]
+      --build-svt-vp9=n [builds libsvt-hevc modules within ffmpeg etc.]
       --build-dvbtee=n [build dvbtee.exe a DVB profiler]
       --compiler-flavors=[multi,win32,win64,native] [default prompt, or skip if you already have one built, multi is both win32 and win64]
       --cflags=[default is $original_cflags, which works on any cpu, see README for options]
@@ -2823,10 +2887,11 @@ while true; do
     --build-dvbtee=* ) build_dvbtee="${1#*=}"; shift ;;
     --disable-nonfree=* ) disable_nonfree="${1#*=}"; shift ;;
     # this doesn't actually "build all", like doesn't build 10 high-bit LGPL ffmpeg, but it does exercise the "non default" type build options...
-    -a         ) compiler_flavors="multi"; build_mplayer=n; build_libmxf=y; build_mp4box=y; build_vlc=y; build_lsw=y;
-                 build_ffmpeg_static=y; build_ffmpeg_shared=y; build_lws=y; disable_nonfree=n; git_get_latest=y;
+    -a         ) compiler_flavors="multi"; build_mplayer=n; build_libmxf=y; build_mp4box=n; build_vlc=y; build_lsw=n;
+                 build_ffmpeg_static=y; build_ffmpeg_shared=y; disable_nonfree=n; git_get_latest=y;
                  sandbox_ok=y; build_amd_amf=y; build_intel_qsv=y; build_dvbtee=y; build_x264_with_libav=y; shift ;;
-    --build-svt=* ) build_svt="${1#*=}"; shift ;;
+    --build-svt-hevc=* ) build_svt_hevc="${1#*=}"; shift ;;
+    --build-svt-vp9=* ) build_svt_vp9="${1#*=}"; shift ;;
     -d         ) gcc_cpu_count=$cpu_count; disable_nonfree="y"; sandbox_ok="y"; compiler_flavors="win64"; git_get_latest="n"; shift ;;
     --compiler-flavors=* )
          compiler_flavors="${1#*=}";
