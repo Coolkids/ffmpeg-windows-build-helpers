@@ -1848,27 +1848,17 @@ build_avisynth() {
 }
 build_vapoursynth() {
   ### 其实不用编译这个 https://github.com/vapoursynth/vapoursynth/releases 下载VapourSynth64-Portable-RXX.7z 解压SDK的.h文件到include目录就可以了
-  ###
-  do_git_checkout https://github.com/vapoursynth/vapoursynth.git vapoursynth_git
-  cd vapoursynth_git
-  ./autogen.sh
-    do_configure "--host=$host_target --enable-vsscript=no --enable-vspipe=no --enable-python-module=no --includedir=$mingw_w64_x86_64_prefix/include --libdir=$mingw_w64_x86_64_prefix/lib"
-    if [[ $compiler_flavors != "native" && ! -f src/core/vscore.h.bak ]]; then
-	    sed -i.bak "s/#include <mutex>/#include \"mingw.mutex.h\"/" src/core/vscore.h
-	    sed -i.bak "s/#include <condition_variable>/#include \"mingw.condition_variable.h\"/" src/core/vscore.h
-	    sed -i.bak "s/#include <thread>/#include \"mingw.thread.h\"/" src/core/vscore.h
-    fi
-    if [[ $compiler_flavors != "native" && ! -f src/core/vslog.cpp.bak ]]; then
-            sed -i.bak "s/#include <mutex>/#include \"mingw.mutex.h\"/" src/core/vslog.cpp
-    fi
-    if [[ $compiler_flavors != "native" && ! -f src/core/memoryuse.h.bak ]]; then
-            sed -i.bak "s/#include <mutex>/#include \"mingw.mutex.h\"/" src/core/memoryuse.h
-    fi 
-    do_make_and_make_install
+  mkdir -p vapoursynth
+  local include_path=$mingw_w64_x86_64_prefix/include/vapoursynth
+  mkdir -p $include_path
+  local version=$(curl -Ls "https://api.github.com/repos/vapoursynth/vapoursynth/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+  download_and_unpack_file https://github.com/vapoursynth/vapoursynth/releases/latest/download/VapourSynth64-Portable-$version.zip
+  cp VapourSynth64-Portable-$version/sdk/include/*.h $include_path
   cd ..
 }
 
 build_libx265() {
+  local /home/coolkid/ffmpeg-windows-build-helpers/sandbox/cross_compilers/mingw-w64-x86_64/x86_64-w64-mingw32/include/
   local checkout_dir=x265_all_bitdepth
   local remote="https://github.com/msg7086/x265-Yuuki-Asuna.git"
   if [[ ! -z $x265_git_checkout_version ]]; then
@@ -2723,7 +2713,7 @@ build_ffmpeg_dependencies() {
   # build_libtensorflow # broken
   build_libvpx
   build_avisynth
-  #build_vapoursynth
+  build_vapoursynth
   build_libx265
   build_libopenh264
   build_libaom
