@@ -28,15 +28,15 @@ jobs:
       - name: delete tag
         uses: dev-drprasad/delete-tag-and-release@v1.0
         with:
-          tag_name: ${{ github.event.inputs.logLevel }}
+          tag_name: ${{ github.event.inputs.ffmpeg_version }}
           github_token: ${{ secrets.TOKEN }}
           delete_release: true
           
       - name: Tag release
         id: create_tag
         run: |
-          git tag -a ${{ github.event.inputs.logLevel }} -m "Release FFmpeg ${{ github.event.inputs.logLevel }}"
-          git push origin ${{ github.event.inputs.logLevel }}
+          git tag -a ${{ github.event.inputs.ffmpeg_version }} -m "Release FFmpeg ${{ github.event.inputs.ffmpeg_version }}"
+          git push origin ${{ github.event.inputs.ffmpeg_version }}
 
       - name: Space cleanup
         env:
@@ -66,7 +66,7 @@ jobs:
           sudo mkdir -p -m 777 /mnt/ffmpeg_build_release
           ln -s /mnt/ffmpeg_build_sandbox ./sandbox
           ln -s /mnt/ffmpeg_build_release ./release
-          sudo ./cross_compile_ffmpeg.sh --compiler-flavors=win64 --ffmpeg-git-checkout-version=${{ github.event.inputs.logLevel }}
+          sudo ./cross_compile_ffmpeg.sh --compiler-flavors=win64 --ffmpeg-git-checkout-version=${{ github.event.inputs.ffmpeg_version }}
 
 
 
@@ -87,11 +87,11 @@ jobs:
           repo_token: ${{ secrets.TOKEN }}
           file: ./release/*
           overwrite: true
-          release_name: Release ${{ github.event.inputs.logLevel }}
-          tag: ${{ github.event.inputs.logLevel }}
+          release_name: Release ${{ github.event.inputs.ffmpeg_version }}
+          tag: ${{ github.event.inputs.ffmpeg_version }}
           file_glob: true
           body: |
-            Release FFmpeg ${{ github.event.inputs.logLevel }}
+            Release FFmpeg ${{ github.event.inputs.ffmpeg_version }}
          
       - name: Delete loder releases
         uses: dev-drprasad/delete-older-releases@v0.3.3
