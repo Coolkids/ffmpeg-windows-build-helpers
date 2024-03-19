@@ -1299,7 +1299,7 @@ build_libvorbis() {
 }
 
 build_libopus() {
-  do_git_checkout https://github.com/xiph/opus.git
+  do_git_checkout https://github.com/xiph/opus.git "origin/main"
   cd opus_git
     generic_configure "--disable-doc --disable-extra-programs --disable-stack-protector"
     do_make_and_make_install
