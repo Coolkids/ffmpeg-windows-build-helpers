@@ -1923,6 +1923,13 @@ END
 EOF
   fi
   make install # force reinstall in case you just switched from stable to not :|
+  local file=$mingw_w64_x86_64_prefix/include/x265.h
+  if grep -q "#include <stdint.h>" "$file"; then
+    sed -i '/#include <stdint.h>/a #include <stdbool.h>' "$file"
+	echo "Added #include <stdbool.h> after #include <stdint.h> in $file"
+  else
+    echo "Error: #include <stdint.h> not found in $file"
+  fi
   cd ../..
 }
 

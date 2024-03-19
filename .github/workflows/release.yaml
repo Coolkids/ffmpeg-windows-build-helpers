@@ -1,0 +1,102 @@
+name: ffmpeg-windows-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ffmpeg_version:
+        description: "ffmpeg version tags"
+        required: true
+        default: 'n6.1.1'
+  
+jobs:
+  build:
+    name: Build ffmpeg windows
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{secrets.TOKEN}}
+      
+      - name: Set variables
+        run: |
+          sudo -E timedatectl set-timezone Asia/Shanghai 
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "github-actions"
+          
+      - name: delete tag
+        uses: dev-drprasad/delete-tag-and-release@v1.0
+        with:
+          tag_name: ${{ github.event.inputs.logLevel }}
+          github_token: ${{ secrets.TOKEN }}
+          delete_release: true
+          
+      - name: Tag release
+        id: create_tag
+        run: |
+          git tag -a ${{ github.event.inputs.logLevel }} -m "Release FFmpeg ${{ github.event.inputs.logLevel }}"
+          git push origin ${{ github.event.inputs.logLevel }}
+
+      - name: Space cleanup
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          docker rmi `docker images -q`
+          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /etc/mysql /etc/php
+          sudo -E apt-get -y purge azure-cli* docker* ghc* zulu* hhvm* llvm* firefox* google* dotnet* aspnetcore* powershell* openjdk* adoptopenjdk* mysql* php* mongodb* moby* snap* || true
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+          bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk gettext gcc-multilib \
+          g++-multilib git gnutls-dev gperf haveged help2man intltool lib32gcc-s1 libc6-dev-i386 libelf-dev \
+          libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5 \
+          libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lld llvm lrzsz mkisofs msmtp \
+          nano ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pip python3-ply \
+          python3-docutils python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
+          texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev yasm
+          sudo -E apt-get -qq autoremove --purge
+          sudo -E apt-get -qq clean
+
+          df -h
+
+      - name: Build
+        run: |
+          workdir=`pwd`
+          sudo mkdir -p -m 777 /mnt/ffmpeg_build_sandbox
+          sudo mkdir -p -m 777 /mnt/ffmpeg_build_release
+          ln -s /mnt/ffmpeg_build_sandbox ./sandbox
+          ln -s /mnt/ffmpeg_build_release ./release
+          sudo ./cross_compile_ffmpeg.sh --compiler-flavors=win64 --ffmpeg-git-checkout-version=${{ github.event.inputs.logLevel }}
+
+
+
+      - name: Prepare artifact
+        run: |
+          cp -rf $(find ./sandbox/redist/ -type f -name "ffmpeg-*") ./release
+
+      - name: Deliver release
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenWrt_buildinfo
+          path: ./release
+
+
+      - name: Upload release asset
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.TOKEN }}
+          file: ./release/*
+          overwrite: true
+          release_name: Release ${{ github.event.inputs.logLevel }}
+          tag: ${{ github.event.inputs.logLevel }}
+          file_glob: true
+          body: |
+            Release FFmpeg ${{ github.event.inputs.logLevel }}
+         
+      - name: Delete loder releases
+        uses: dev-drprasad/delete-older-releases@v0.3.3
+        with:
+          keep_latest: 5
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+    
