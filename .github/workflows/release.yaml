@@ -13,20 +13,28 @@ jobs:
     name: Build ffmpeg release ${{ github.event.inputs.ffmpeg_version }}
     runs-on: ubuntu-22.04
     steps:
+      - name: Set workspace
+        run: |
+          sudo mkdir -p -m 777 /mnt/ffmpeg_build_sandbox
+          echo "WORK_PATH=/mnt/ffmpeg_build_sandbox" >> $GITHUB_ENV
+        
       - name: Checkout
         uses: actions/checkout@v4
+        working-directory: ${{ env.WORK_PATH }}
         with:
           ref: master
           token: ${{secrets.TOKEN}}
       
       - name: Set variables
+        working-directory: ${{ env.WORK_PATH }}
         run: |
           sudo -E timedatectl set-timezone Asia/Shanghai 
           git config --global user.email "github-actions@github.com"
           git config --global user.name "github-actions"
           
       - name: delete tag
-        uses: dev-drprasad/delete-tag-and-release@v1.0
+        uses: dev-drprasad/delete-tag-and-release@v1.0\
+        working-directory: ${{ env.WORK_PATH }}
         with:
           tag_name: ${{ github.event.inputs.ffmpeg_version }}
           github_token: ${{ secrets.TOKEN }}
@@ -34,6 +42,7 @@ jobs:
           
       - name: Tag release
         id: create_tag
+        working-directory: ${{ env.WORK_PATH }}
         run: |
           git tag -a ${{ github.event.inputs.ffmpeg_version }} -m "Release FFmpeg ${{ github.event.inputs.ffmpeg_version }}"
           git push origin ${{ github.event.inputs.ffmpeg_version }}
@@ -62,22 +71,21 @@ jobs:
           df -h
 
       - name: Build
+        working-directory: ${{ env.WORK_PATH }}
         run: |
-          workdir=`pwd`
-          sudo mkdir -p -m 777 /mnt/ffmpeg_build_sandbox
-          sudo mkdir -p -m 777 /mnt/ffmpeg_build_release
-          ln -s /mnt/ffmpeg_build_sandbox ./sandbox
-          ln -s /mnt/ffmpeg_build_release ./release
           ./cross_compile_ffmpeg.sh --compiler-flavors=win64 --ffmpeg-git-checkout-version=${{ github.event.inputs.ffmpeg_version }}
 
 
 
       - name: Prepare artifact
+        working-directory: ${{ env.WORK_PATH }}
         run: |
+          mkdir -p ./release
           cp -rf $(find ./sandbox/redist/ -type f -name "ffmpeg-*") ./release
 
       - name: Deliver release
         uses: actions/upload-artifact@v4
+        working-directory: ${{ env.WORK_PATH }}
         with:
           name: OpenWrt_buildinfo
           path: ./release
@@ -85,6 +93,7 @@ jobs:
 
       - name: Upload release asset
         uses: svenstaro/upload-release-action@v2
+        working-directory: ${{ env.WORK_PATH }}
         with:
           repo_token: ${{ secrets.TOKEN }}
           file: ./release/*
@@ -97,6 +106,7 @@ jobs:
          
       - name: Delete loder releases
         uses: dev-drprasad/delete-older-releases@v0.3.3
+        working-directory: ${{ env.WORK_PATH }}
         with:
           keep_latest: 5
         env:
