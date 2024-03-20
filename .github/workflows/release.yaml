@@ -20,13 +20,11 @@ jobs:
         
       - name: Checkout
         uses: actions/checkout@v4
-        path: ${{ env.WORK_PATH }}
         with:
           ref: master
           token: ${{secrets.TOKEN}}
       
       - name: Set variables
-        working-directory: ${{ env.WORK_PATH }}
         run: |
           sudo -E timedatectl set-timezone Asia/Shanghai 
           git config --global user.email "github-actions@github.com"
@@ -41,7 +39,6 @@ jobs:
           
       - name: Tag release
         id: create_tag
-        working-directory: ${{ env.WORK_PATH }}
         run: |
           git tag -a ${{ github.event.inputs.ffmpeg_version }} -m "Release FFmpeg ${{ github.event.inputs.ffmpeg_version }}"
           git push origin ${{ github.event.inputs.ffmpeg_version }}
@@ -68,7 +65,10 @@ jobs:
           sudo -E apt-get -qq clean
 
           df -h
-
+      - name: Move Build Path
+        run: |
+          cp -r ./* ${{ env.WORK_PATH }}
+        
       - name: Build
         working-directory: ${{ env.WORK_PATH }}
         run: |
@@ -84,18 +84,16 @@ jobs:
 
       - name: Deliver release
         uses: actions/upload-artifact@v4
-        working-directory: ${{ env.WORK_PATH }}
         with:
           name: OpenWrt_buildinfo
-          path: ./release
+          path: /mnt/ffmpeg_build_sandbox/release
 
 
       - name: Upload release asset
         uses: svenstaro/upload-release-action@v2
-        working-directory: ${{ env.WORK_PATH }}
         with:
           repo_token: ${{ secrets.TOKEN }}
-          file: ./release/*
+          file: /mnt/ffmpeg_build_sandbox/release/*
           overwrite: true
           release_name: Release ${{ github.event.inputs.ffmpeg_version }}
           tag: ${{ github.event.inputs.ffmpeg_version }}
@@ -105,7 +103,6 @@ jobs:
          
       - name: Delete loder releases
         uses: dev-drprasad/delete-older-releases@v0.3.3
-        working-directory: ${{ env.WORK_PATH }}
         with:
           keep_latest: 5
         env:
