@@ -432,7 +432,15 @@ do_git_checkout() {
   # reset will be useless if they didn't git_get_latest but pretty fast so who cares...plus what if they changed branches? :)
   old_git_version=`git rev-parse HEAD`
   if [[ -z $desired_branch ]]; then
-    desired_branch="origin/master"
+	# Check for either "origin/main" or "origin/master".
+	if [ $(git show-ref | grep -e origin\/main$ -c) = 1 ]; then
+		desired_branch="origin/main"
+	elif [ $(git show-ref | grep -e origin\/master$ -c) = 1 ]; then
+		desired_branch="origin/master"
+	else
+		echo "No valid git branch!"
+		exit 1
+	fi
   fi
   echo "doing git checkout $desired_branch"
   git -c 'advice.detachedHead=false' checkout "$desired_branch" || (git_hard_reset && git -c 'advice.detachedHead=false' checkout "$desired_branch") || (git reset --hard "$desired_branch") || exit 1 # can't just use merge -f because might "think" patch files already applied when their changes have been lost, etc...
@@ -1037,10 +1045,10 @@ build_harfbuzz() {
   else
     echo "Already done harfbuzz"
   fi
-  sed -i.bak 's/-lfreetype.*/-lfreetype -lharfbuzz -lpthread/' "$PKG_CONFIG_PATH/freetype2.pc" # for some reason it lists harfbuzz as Requires.private only??
-  sed -i.bak 's/-lharfbuzz.*/-lharfbuzz -lfreetype/' "$PKG_CONFIG_PATH/harfbuzz.pc" # does anything even use this?
-  sed -i.bak 's/libfreetype.la -lbz2/libfreetype.la -lharfbuzz -lbz2/' "${mingw_w64_x86_64_prefix}/lib/libfreetype.la" # XXX what the..needed?
-  sed -i.bak 's/libfreetype.la -lbz2/libfreetype.la -lharfbuzz -lbz2/' "${mingw_w64_x86_64_prefix}/lib/libharfbuzz.la"
+  sed -i.bak 's/-lfreetype.*/-lfreetype -lharfbuzz -lpng -lbz2 -lpthread/' "$PKG_CONFIG_PATH/freetype2.pc" # for some reason it lists harfbuzz as Requires.private only??
+  sed -i.bak 's/-lharfbuzz.*/-lfreetype -lharfbuzz -lpng -lbz2 -lpthread/' "$PKG_CONFIG_PATH/harfbuzz.pc" # does anything even use this?
+  sed -i.bak 's/libfreetype.la -lbz2/libfreetype.la -lharfbuzz -lpng -lbz2 -lpthread/' "${mingw_w64_x86_64_prefix}/lib/libfreetype.la" # XXX what the..needed?
+  sed -i.bak 's/libfreetype.la -lbz2/libfreetype.la -lharfbuzz -lpng -lbz2 -lpthread/' "${mingw_w64_x86_64_prefix}/lib/libharfbuzz.la"
 }
 
 build_freetype() {
@@ -1299,7 +1307,7 @@ build_libvorbis() {
 }
 
 build_libopus() {
-  do_git_checkout https://github.com/xiph/opus.git opus_git main
+  do_git_checkout https://github.com/xiph/opus.git opus_git origin/main
   cd opus_git
     generic_configure "--disable-doc --disable-extra-programs --disable-stack-protector"
     do_make_and_make_install
@@ -1494,7 +1502,7 @@ build_libbluray() {
       fi
     cd ../..
     generic_configure "--disable-examples --disable-bdjava-jar"
-    do_make_and_make_install
+    do_make_and_make_install "CPPFLAGS=\"-Ddec_init=libbr_dec_init\""
   cd ..
 }
 
@@ -2443,8 +2451,11 @@ build_ffmpeg() {
       config_options+=" --enable-nvenc --enable-nvdec" # don't work OS X
     fi
 
-    config_options+=" --extra-libs=-lharfbuzz" #  grr...needed for pre x264 build???
+    # the order of extra-libs switches is important (appended in reverse)
+    config_options+=" --extra-libs=-lz"
+    config_options+=" --extra-libs=-lpng"
     config_options+=" --extra-libs=-lm" # libflite seemed to need this linux native...and have no .pc file huh?
+    config_options+=" --extra-libs=-lfreetype"
 
     if [[ $compiler_flavors != "native" ]]; then
       config_options+=" --extra-libs=-lshlwapi" # lame needed this, no .pc file?
