@@ -1883,7 +1883,7 @@ build_vapoursynth() {
   mkdir -p $include_path
   local version=$(curl -Ls "https://api.github.com/repos/vapoursynth/vapoursynth/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 	download_and_unpack_file https://github.com/vapoursynth/vapoursynth/releases/latest/download/VapourSynth64-Portable-$version.zip .
-	cp ./sdk/include/*.h $include_path
+	cp ./sdk/include/vapoursynth/*.h $include_path
   cd ..
 }
 
