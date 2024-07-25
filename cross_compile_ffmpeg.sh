@@ -405,6 +405,27 @@ do_svn_checkout() {
   fi
 }
 
+# params: git url, to_dir
+retry_git_or_die() {  # originally from https://stackoverflow.com/a/76012343/32453
+  local RETRIES_NO=50
+  local RETRY_DELAY=3
+  local repo_url=$1
+  local to_dir=$2
+
+  for i in $(seq 1 $RETRIES_NO); do
+   echo "Downloading (via git clone) $to_dir from $repo_url"
+   rm -rf $to_dir.tmp # just in case it was interrupted previously...not sure if necessary...
+   git clone $repo_url $to_dir.tmp --recurse-submodules && break
+   # get here -> failure
+   [[ $i -eq $RETRIES_NO ]] && echo "Failed to execute git cmd $repo_url $to_dir after $RETRIES_NO retries" && exit 1
+   echo "sleeping before retry git"
+   sleep ${RETRY_DELAY}
+  done
+  # prevent partial checkout confusion by renaming it only after success
+  mv $to_dir.tmp $to_dir
+  echo "done git cloning to $to_dir"
+}
+
 do_git_checkout() {
   local repo_url="$1"
   local to_dir="$2"
@@ -413,12 +434,7 @@ do_git_checkout() {
   fi
   local desired_branch="$3"
   if [ ! -d $to_dir ]; then
-    echo "Downloading (via git clone) $to_dir from $repo_url"
-    rm -rf $to_dir.tmp # just in case it was interrupted previously...
-    git clone $repo_url $to_dir.tmp --recurse-submodules || exit 1
-    # prevent partial checkouts by renaming it only after success
-    mv $to_dir.tmp $to_dir
-    echo "done git cloning to $to_dir"
+    retry_git_or_die $repo_url $to_dir
     cd $to_dir
   else
     cd $to_dir
@@ -497,6 +513,7 @@ do_configure() {
       autoreconf -fiv # a handful of them require this to create ./configure :|
     fi
     rm -f already_* # reset
+    chmod u+x "$configure_name" # In non-windows environments, with devcontainers, the configuration file doesn't have execution permissions
     nice -n 5 "$configure_name" $configure_options || { echo "failed configure $english_name"; exit 1;} # less nicey than make (since single thread, and what if you're running another ffmpeg nice build elsewhere?)
     touch -- "$touch_name"
     echo "doing preventative make clean"
@@ -868,7 +885,7 @@ build_nv_headers() {
   cd ..
 }
 
-build_intel_quicksync_mfx() { # i.e. qsv, disableable via command line switch...
+build_intel_qsv_mfx() { # disableable via command line switch...
   do_git_checkout https://github.com/lu-zero/mfx_dispatch.git mfx_dispatch_git 2cd279f # lu-zero?? oh well seems somewhat supported...
   cd mfx_dispatch_git
     if [[ ! -f "configure" ]]; then
@@ -876,7 +893,7 @@ build_intel_quicksync_mfx() { # i.e. qsv, disableable via command line switch...
       automake --add-missing || exit 1
     fi
     if [[ $compiler_flavors == "native" && $OSTYPE != darwin* ]]; then
-      unset PKG_CONFIG_LIBDIR # allow mfx_dispatch to use libva-dev or some odd...not sure for OS X so just disable it :)
+      unset PKG_CONFIG_LIBDIR # allow mfx_dispatch to use libva-dev or some odd on linux...not sure for OS X so just disable it :)
       generic_configure_make_install
       export PKG_CONFIG_LIBDIR=
     else
@@ -1018,7 +1035,7 @@ build_libwebp() {
 
 build_harfbuzz() {
   local new_build=false
-  do_git_checkout https://github.com/harfbuzz/harfbuzz.git harfbuzz_git "origin/main"
+  do_git_checkout https://github.com/harfbuzz/harfbuzz.git harfbuzz_git "93930fb1c49b85" # keep old autogen build :)
   if [ ! -f harfbuzz_git/already_done_harf ]; then # Not done or new master, so build
     new_build=true
   fi
@@ -1493,6 +1510,8 @@ build_libbluray() {
     if [[ ! -f jni/win32/jni_md.h.bak ]]; then
       sed -i.bak "/JNIEXPORT/s/ __declspec.*//" jni/win32/jni_md.h # Needed for building shared FFmpeg libraries.
     fi
+    # avoid collision with newer ffmpegs, couldn't figure out better glob LOL
+    sed -i.bak "s/dec_init/dec__init/g" src/libbluray/disc/*.{c,h}
     cd contrib/libudfread
       if [[ ! -f src/udfread.c.bak ]]; then
         sed -i.bak "/WIN32$/,+4d" src/udfread.c # Fix WinXP incompatibility.
@@ -1509,6 +1528,7 @@ build_libbluray() {
 build_libbs2b() {
   download_and_unpack_file https://downloads.sourceforge.net/project/bs2b/libbs2b/3.1.0/libbs2b-3.1.0.tar.gz
   cd libbs2b-3.1.0
+    apply_patch file://$patch_dir/libbs2b.patch
     sed -i.bak "s/AC_FUNC_MALLOC//" configure.ac # #270
     export LIBS=-lm # avoid pow failure linux native
     generic_configure_make_install
@@ -1702,6 +1722,7 @@ build_zvbi() {
       apply_patch file://$patch_dir/zvbi-win32.patch
     fi
     apply_patch file://$patch_dir/zvbi-no-contrib.diff # weird issues with some stuff in contrib...
+    apply_patch file://$patch_dir/zvbi-aarch64.patch
     generic_configure " --disable-dvb --disable-bktr --disable-proxy --disable-nls --without-doxygen --without-libiconv-prefix"
     # Without '--without-libiconv-prefix' 'configure' would otherwise search for and only accept a shared Libiconv library.
     do_make_and_make_install
@@ -1881,6 +1902,11 @@ build_libx265() {
   cd $checkout_dir
 
   local cmake_params="-DENABLE_SHARED=0" # build x265.exe
+
+  # Apply x86 noasm detection fix on newer versions
+  if [[ $x265_git_checkout_version != *"3.5"* ]] && [[ $x265_git_checkout_version != *"3.4"* ]] && [[ $x265_git_checkout_version != *"3.3"* ]] && [[ $x265_git_checkout_version != *"3.2"* ]] && [[ $x265_git_checkout_version != *"3.1"* ]]; then
+    git apply "$patch_dir/x265_x86_noasm_fix.patch"
+  fi
 
   if [ "$bits_target" = "32" ]; then
     cmake_params+=" -DWINXP_SUPPORT=1" # enable windows xp/vista compatibility in x86 build, since it still can I think...
@@ -2650,7 +2676,7 @@ build_ffmpeg_dependencies() {
     build_amd_amf_headers
   fi
   if [[ $build_intel_qsv = y && $compiler_flavors != "native" ]]; then # Broken for native builds right now: https://github.com/lu-zero/mfx_dispatch/issues/71
-    build_intel_quicksync_mfx
+    build_intel_qsv_mfx
   fi
   build_nv_headers
   build_libzimg # Uses dlfcn.
@@ -2780,7 +2806,6 @@ if [ -z "$cpu_count" ]; then
     cpu_count=1 # else default to just 1, instead of blank, which means infinite
   fi
 fi
-original_cpu_count=$cpu_count # save it away for some that revert it temporarily
 
 set_box_memory_size_bytes
 if [[ $box_memory_size_bytes -lt 600000000 ]]; then
@@ -2846,11 +2871,12 @@ while true; do
       --ffmpeg-source-dir=[default empty] specifiy the directory of ffmpeg source code. When specified, git will not be used.
       --x265-git-checkout-version=[master] if you want to build a particular version of x265, ex: --x265-git-checkout-version=Release_3.2 or a specific git hash
       --fdk-aac-git-checkout-version= if you want to build a particular version of fdk-aac, ex: --fdk-aac-git-checkout-version=v2.0.1 or another tag
-      --gcc-cpu-count=[number of cpu cores set it higher than 1 if you have multiple cores and > 1GB RAM, this speeds up initial cross compiler build. FFmpeg build uses number of cores no matter what]
+      --gcc-cpu-count=[cpu_cores_on_box if RAM > 1GB else 1] number of cpu cores this speeds up initial cross compiler build.
+      --build-cpu-count=[cpu_cores_on_box] set to lower than your cpu cores if the background processes eating all your cpu bugs your desktop usage
       --disable-nonfree=y (set to n to include nonfree like libfdk-aac,decklink)
       --build-intel-qsv=y (set to y to include the [non windows xp compat.] qsv library and ffmpeg module. NB this not not hevc_qsv...
       --sandbox-ok=n [skip sandbox prompt if y]
-      -d [meaning \"defaults\" skip all prompts, just build ffmpeg static with some reasonable defaults like no git updates]
+      -d [meaning \"defaults\" skip all prompts, just build ffmpeg static 64 bit with some defaults for speed like no git updates]
       --build-libmxf=n [builds libMXF, libMXF++, writeavidmxfi.exe and writeaviddv50.exe from the BBC-Ingex project]
       --build-mp4box=n [builds MP4Box.exe from the gpac project]
       --build-mplayer=n [builds mplayer.exe and mencoder.exe]
@@ -2872,6 +2898,7 @@ while true; do
        "; exit 0 ;;
     --sandbox-ok=* ) sandbox_ok="${1#*=}"; shift ;;
     --gcc-cpu-count=* ) gcc_cpu_count="${1#*=}"; shift ;;
+    --build-cpu-count=* ) cpu_count="${1#*=}"; shift ;;
     --ffmpeg-git-checkout-version=* ) ffmpeg_git_checkout_version="${1#*=}"; shift ;;
     --ffmpeg-git-checkout=* ) ffmpeg_git_checkout="${1#*=}"; shift ;;
     --ffmpeg-source-dir=* ) ffmpeg_source_dir="${1#*=}"; shift ;;
@@ -2897,7 +2924,7 @@ while true; do
                  sandbox_ok=y; build_amd_amf=y; build_intel_qsv=y; build_dvbtee=y; build_x264_with_libav=y; shift ;;
     --build-svt-hevc=* ) build_svt_hevc="${1#*=}"; shift ;;
     --build-svt-vp9=* ) build_svt_vp9="${1#*=}"; shift ;;
-    -d         ) gcc_cpu_count=$cpu_count; disable_nonfree="y"; sandbox_ok="y"; compiler_flavors="win64"; git_get_latest="n"; shift ;;
+    -d         ) echo "defaults: doing 64 bit only, fast"; gcc_cpu_count=$cpu_count; disable_nonfree="y"; sandbox_ok="y"; compiler_flavors="win64"; git_get_latest="n"; shift ;;
     --compiler-flavors=* )
          compiler_flavors="${1#*=}";
          if [[ $compiler_flavors == "native" && $OSTYPE == darwin* ]]; then
@@ -2917,6 +2944,7 @@ while true; do
   esac
 done
 
+original_cpu_count=$cpu_count # save it away for some that revert it temporarily
 reset_cflags # also overrides any "native" CFLAGS, which we may need if there are some 'linux only' settings in there
 reset_cppflags # Ensure CPPFLAGS are cleared and set to what is configured
 check_missing_packages # do this first since it's annoying to go through prompts then be rejected
